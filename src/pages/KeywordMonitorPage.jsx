@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Navbar from '../components/Navbar'; 
 
 const API_BASE_URL = import.meta.env.VITE_KEYWORD_MONITOR_API_URL;
-
+const MAX_RETRIES = 5; // Set a maximum number of retries
 
 function KeywordMonitorPage() {
   
@@ -14,7 +14,11 @@ function KeywordMonitorPage() {
   const [availableGroups, setAvailableGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [newKeywords, setNewKeywords] = useState('');
-  const [isClientConnecting, setIsClientConnecting] = useState(true);
+  
+  // NEW: Refined state for connection and error handling
+  const [connectionStatus, setConnectionStatus] = useState('connecting'); // 'connecting', 'connected', 'failed'
+  const [fetchError, setFetchError] = useState('');
+
 
   // State for inline editing of keywords
   const [editingGroupId, setEditingGroupId] = useState(null);
@@ -45,29 +49,47 @@ function KeywordMonitorPage() {
     }
   };
 
-  // useEffect to fetch AVAILABLE groups for the dropdown (with retry logic)
+  // --- REFACTORED: useEffect to fetch AVAILABLE groups with robust retry logic ---
   useEffect(() => {
-    const fetchAvailableGroups = async () => {
+    const fetchAvailableGroups = async (attempt = 1) => {
       try {
         const response = await fetch(`${API_BASE_URL}/groups/available`);
+        
         if (response.ok) {
           const data = await response.json();
           setAvailableGroups(data);
-          setIsClientConnecting(false);
-        } else if (response.status === 503) {
-          console.log("Client not ready (503), retrying in 3 seconds...");
-          setTimeout(fetchAvailableGroups, 3000);
+          setConnectionStatus('connected'); // Success!
+          setFetchError('');
+          return; // Exit the function on success
+        } 
+        
+        if (response.status === 503 && attempt <= MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff (2s, 4s, 8s...)
+          setConnectionStatus('connecting');
+          setFetchError(`Service is not ready. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${MAX_RETRIES})`);
+          setTimeout(() => fetchAvailableGroups(attempt + 1), delay);
         } else {
-          console.error("Failed to fetch available groups, status:", response.status);
-          setIsClientConnecting(false);
+          // Handle permanent failure after retries or other HTTP errors
+          setConnectionStatus('failed');
+          setFetchError(`Failed to fetch groups after ${attempt} attempts. Please ensure the backend server is running.`);
         }
+
       } catch (error) {
-        console.error("Error fetching available groups:", error);
-        setTimeout(fetchAvailableGroups, 3000);
+        // Handle network errors like connection refused
+        if (attempt <= MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000;
+          setConnectionStatus('connecting');
+          setFetchError(`Could not connect to the server. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${MAX_RETRIES})`);
+          setTimeout(() => fetchAvailableGroups(attempt + 1), delay);
+        } else {
+          setConnectionStatus('failed');
+          setFetchError("Failed to connect to the backend server. Please check the console and ensure the API is running.");
+        }
       }
     };
+
     fetchAvailableGroups();
-  }, []);
+  }, []); // Empty dependency array ensures this runs only once on mount
 
   // useEffect to fetch MONITORED groups when the component loads
   useEffect(() => {
@@ -172,8 +194,61 @@ function KeywordMonitorPage() {
   const cardStyle = "bg-gray-800 p-8 rounded-xl shadow-lg w-full max-w-6xl mx-auto border border-gray-700";
   const labelStyle = "block text-gray-400 text-sm font-bold mb-2";
   const inputStyle = "bg-gray-700 shadow border border-gray-600 rounded w-full py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500";
-  const buttonStyle = "w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition-colors";
+  const buttonStyle = "w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-cyan-800 disabled:cursor-not-allowed";
   const actionButton = "py-1 px-3 rounded-md text-sm font-semibold text-white transition-colors";
+
+  // --- NEW: Component to render the connection status ---
+  const ConnectionStatusDisplay = () => {
+    if (connectionStatus === 'connecting') {
+      return (
+        <div className="text-center text-yellow-400 bg-yellow-900/50 p-4 rounded-md border border-yellow-800">
+          <p>Connecting to Telegram service...</p>
+          {fetchError && <p className="text-sm text-yellow-500 mt-1">{fetchError}</p>}
+        </div>
+      );
+    }
+
+    if (connectionStatus === 'failed') {
+      return (
+        <div className="text-center text-red-400 bg-red-900/50 p-4 rounded-md border border-red-800">
+          <p className="font-bold">Connection Failed</p>
+          {fetchError && <p className="text-sm text-red-500 mt-1">{fetchError}</p>}
+        </div>
+      );
+    }
+
+    // If connected, render the form
+    return (
+      <form onSubmit={handleAddSubmit} className="space-y-4">
+        <div>
+          <label className={labelStyle}>Group</label>
+          <select
+            value={selectedGroupId}
+            onChange={(e) => setSelectedGroupId(e.target.value)}
+            className={inputStyle} required>
+            <option value="" disabled>Select a group</option>
+            {availableGroups.length > 0 ? (
+              availableGroups.map(group => (
+                <option key={group.id} value={group.id}>{group.title}</option>
+              ))
+            ) : (
+              <option disabled>No groups found or client not connected</option>
+            )}
+          </select>
+        </div>
+        <div>
+          <label className={labelStyle}>Keywords (comma-separated)</label>
+          <input
+            type="text"
+            value={newKeywords}
+            onChange={(e) => setNewKeywords(e.target.value)}
+            placeholder="e.g., fastapi, bitcoin, gaming"
+            className={inputStyle} required />
+        </div>
+        <button type="submit" className={buttonStyle} disabled={availableGroups.length === 0}>Add Group</button>
+      </form>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -182,43 +257,10 @@ function KeywordMonitorPage() {
         <div className={cardStyle}>
           <h2 className="text-2xl font-bold mb-6 text-center text-cyan-400">Manage Monitored Groups</h2>
           
-          {/* ADD NEW GROUP FORM */}
+          {/* ADD NEW GROUP FORM SECTION */}
           <div className="bg-gray-900/50 p-6 rounded-lg mb-8">
             <h3 className="text-xl font-semibold mb-4 border-b border-gray-600 pb-2">Add New Group</h3>
-            {isClientConnecting ? (
-              <div className="text-center text-gray-400 p-4">
-                <p>Connecting to Telegram, please wait...</p>
-              </div>
-            ) : (
-              <form onSubmit={handleAddSubmit} className="space-y-4">
-                <div>
-                  <label className={labelStyle}>Group</label>
-                  <select
-                    value={selectedGroupId}
-                    onChange={(e) => setSelectedGroupId(e.target.value)}
-                    className={inputStyle} required>
-                    <option value="" disabled>Select a group</option>
-                    {availableGroups.length > 0 ? (
-                      availableGroups.map(group => (
-                        <option key={group.id} value={group.id}>{group.title}</option>
-                      ))
-                    ) : (
-                      <option disabled>No groups found</option>
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelStyle}>Keywords (comma-separated)</label>
-                  <input
-                    type="text"
-                    value={newKeywords}
-                    onChange={(e) => setNewKeywords(e.target.value)}
-                    placeholder="e.g., fastapi, bitcoin, gaming"
-                    className={inputStyle} required />
-                </div>
-                <button type="submit" className={buttonStyle} disabled={availableGroups.length === 0}>Add Group</button>
-              </form>
-            )}
+            <ConnectionStatusDisplay />
           </div>
           
           {/* CURRENTLY MONITORING LIST */}
