@@ -129,33 +129,33 @@ function KeywordSearchPage() {
           <h2 className="text-2xl font-bold text-cyan-400 mb-4">
             Found Messages ({searchResult.messages.length})
           </h2>
-          <div className="max-h-[60vh] overflow-y-auto border border-gray-700 rounded-lg">
-            <table className="min-w-full divide-y divide-gray-700">
-              <thead className="bg-gray-900/50 sticky top-0">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Author</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Chat Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Message</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Timestamp</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Link</th>
-                </tr>
-              </thead>
-              <tbody className="bg-gray-800 divide-y divide-gray-700">
-                {searchResult.messages.length > 0 ? (
-                  searchResult.messages.map((msg, index) => (
-                    <tr key={index}>
-                      <td className="px-6 py-4 whitespace-nowrap align-top"><p className="font-bold text-gray-200">{msg.author}</p><p className="text-xs text-cyan-400">{msg.username}</p></td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400 align-top">{msg.chat_name}</td>
-                      <td className="px-6 py-4 text-sm text-gray-300 align-top max-w-md wrap-break-words">{msg.text}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400 align-top">{new Date(msg.date).toLocaleString()}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm align-top"><a href={msg.message_link} target="_blank" rel="noopener noreferrer" className="font-bold text-cyan-400 hover:text-cyan-300">View Message</a></td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr><td colSpan="5" className="text-center py-10 text-gray-500">No messages found for your criteria.</td></tr>
-                )}
-              </tbody>
-            </table>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            {searchResult.messages.length > 0 ? (
+              searchResult.messages.map((msg, index) => (
+                <div key={index} className="bg-gray-900/50 border border-gray-700 rounded-lg p-4 shadow-md transition-transform duration-200 hover:scale-[1.01] hover:border-cyan-700/50">
+                  {/* Card Header */}
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <p className="font-bold text-gray-100">{msg.author}</p>
+                      <p className="text-sm text-cyan-400 -mt-1">{msg.username}</p>
+                    </div>
+                    <span className="bg-gray-700 text-gray-300 text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap">{msg.chat_name}</span>
+                  </div>
+
+                  {/* Message Body */}
+                  <p className="text-gray-300 my-2 wrap-break-words">
+                    {msg.text}
+                  </p>
+                  
+                  {/* Card Footer */}
+                  <div className="text-right text-xs text-gray-500 mt-3">
+                    {new Date(msg.date).toLocaleString()}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-10 text-gray-500">No messages found for your criteria.</div>
+            )}
           </div>
         </div>
       </div>
