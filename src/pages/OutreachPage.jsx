@@ -7,6 +7,7 @@ import EnrollmentModal from '../components/EnrollmentModal';
 // API Urls
 const API_URL = import.meta.env.VITE_OUTREACH_API_URL;
 const WORKFLOW_START_URL = import.meta.env.VITE_WORKFLOW_START_URL;
+const SESSIONS_API_URL = import.meta.env.VITE_TELEGRAM_ACCOUNT_SESSIONS_API_URL;
 
 
 function OutreachPage() {
@@ -30,11 +31,14 @@ function OutreachPage() {
 
   const [managingCampaign, setManagingCampaign] = useState(null);
 
-  // --- NEW: States for filtered contact data ---
+  // --- States for filtered contact data ---
   const [filteredContacts, setFilteredContacts] = useState([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState('');
-  const [searchParams] = useSearchParams(); // Hook to get URL query params
+  const [searchParams] = useSearchParams();
+
+  // --- NEW: State to track the active campaign ID ---
+  const [activeCampaignId, setActiveCampaignId] = useState(null);
 
   // --- Generic Fetch Helper ---
   const apiFetch = useCallback(async (url, options = {}) => {
@@ -55,7 +59,7 @@ function OutreachPage() {
     }
   }, []);
 
-  // --- Data Fetching Callbacks (Original) ---
+  // --- Data Fetching Callbacks ---
   const fetchCampaignAccounts = useCallback(async () => {
     setAccountsLoading(true); setAccountsError('');
     try {
@@ -74,13 +78,11 @@ function OutreachPage() {
     finally { setCampaignsLoading(false); }
   }, [apiFetch]);
 
-  // --- NEW: Data Fetching Callback for Filtered Contacts ---
   const fetchFilteredContacts = useCallback(async (params) => {
     setContactsLoading(true);
     setContactsError('');
     try {
       const queryString = params.toString();
-      // This endpoint needs to be created on your backend to handle the filtering logic.
       const data = await apiFetch(`${API_URL}/database/contacts/filter?${queryString}`);
       setFilteredContacts(data || []);
     } catch (err) {
@@ -96,7 +98,7 @@ function OutreachPage() {
     fetchCampaigns();
   }, [fetchCampaignAccounts, fetchCampaigns]);
 
-  // --- NEW: useEffect to trigger data fetch when URL filter params change ---
+  // useEffect to trigger data fetch when URL filter params change
   useEffect(() => {
     if (searchParams.toString()) {
       fetchFilteredContacts(searchParams);
@@ -105,7 +107,29 @@ function OutreachPage() {
     }
   }, [searchParams, fetchFilteredContacts]);
 
-  // --- Campaign Handlers (Original) ---
+  // --- NEW: useEffect for polling active campaign status ---
+  useEffect(() => {
+    const fetchActiveCampaignStatus = async () => {
+      try {
+        const response = await fetch(`${SESSIONS_API_URL}/active-campaign`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch status');
+        }
+        const data = await response.json();
+        setActiveCampaignId(data.active_campaign_id);
+      } catch (error) {
+        // Silently fail is okay, as it just means the status won't update
+        console.error("Polling for active campaign failed:", error);
+      }
+    };
+
+    fetchActiveCampaignStatus(); // Initial fetch on mount
+    const intervalId = setInterval(fetchActiveCampaignStatus, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(intervalId); // Cleanup on unmount
+  }, []);
+
+  // --- Campaign Handlers ---
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!newCampaignName.trim() || !newCampaignMessage.trim()) return;
@@ -169,7 +193,18 @@ function OutreachPage() {
     }
   };
 
-  // --- Helper Functions & Dynamic Properties (Original) ---
+  // --- NEW: Handler for stopping the workflow ---
+  const handleWorkflowStop = async () => {
+    try {
+      await apiFetch(`${SESSIONS_API_URL}/stop`);
+      alert('Workflow stopped.');
+      setActiveCampaignId(0); // Immediately update UI to show inactive status
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  // --- Helper Functions & Dynamic Properties ---
   const formatTimestamp = (ts) => ts ? new Date(ts).toLocaleString() : 'N/A';
   const getStatusClass = (status) => {
     switch (status) {
@@ -181,10 +216,10 @@ function OutreachPage() {
   };
 
   const isButtonDisabled = workflowStatus === 'starting';
-  const getWorkflowButtonText = () => workflowStatus === 'starting' ? 'Starting...' : 'Start Master Workflow';
-  const getWorkflowButtonClass = () => 'bg-indigo-600 hover:bg-indigo-700';
+  const getWorkflowButtonText = () => workflowStatus === 'starting' ? 'Starting...' : 'Start Campaign';
+  const getWorkflowButtonClass = () => 'bg-green-600 hover:bg-green-700';
 
-  // --- Styles (Original) ---
+  // --- Styles ---
   const cardStyle = "bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700";
   const headingStyle = "text-xl font-semibold text-white mb-4";
   const buttonStyle = "px-4 py-2 font-bold rounded-lg transition-colors text-xs";
@@ -205,7 +240,7 @@ function OutreachPage() {
 
   const campaignOptions = campaigns.map(c => ({ value: c.id, label: c.name }));
 
-  // --- NEW: A flag to determine which view to show ---
+  // --- Flag to determine which view to show ---
   const hasFilters = searchParams.toString().length > 0;
 
   return (
@@ -221,7 +256,7 @@ function OutreachPage() {
       <main className="p-6">
         <div className="container mx-auto grid grid-cols-1 gap-8">
           
-          {/* --- NEW: Conditional rendering for the filter results view --- */}
+          {/* --- Conditional rendering for the filter results view --- */}
           {hasFilters ? (
             <div className={cardStyle}>
               <div className="flex justify-between items-center mb-4">
@@ -277,20 +312,25 @@ function OutreachPage() {
                       <Link to="/outreach/stats">
                           <button className={`${headerButtonStyle} bg-teal-600 hover:bg-teal-700`}>Stats</button>
                       </Link>
-                      {/* MODIFIED: Button now links to the dedicated filter page */}
                       <Link to="/outreach/filter">
                         <button className={`${headerButtonStyle} bg-gray-600 hover:bg-gray-500`}>Filter Data</button>
                       </Link>
                   </div>
                 </div>
                 
+                {/* MODIFIED: Workflow controls now include a STOP button */}
                 <div>
                     <div className="mb-4">
-                        <Select options={campaignOptions} onChange={setSelectedCampaign} value={selectedCampaign} styles={selectStyles} placeholder="Select a campaign..." isClearable />
+                        <Select options={campaignOptions} onChange={setSelectedCampaign} value={selectedCampaign} styles={selectStyles} placeholder="Select a campaign to start..." isClearable />
                     </div>
-                  <button onClick={handleWorkflowToggle} disabled={isButtonDisabled} className={`${buttonStyle} ${getWorkflowButtonClass()} disabled:bg-gray-500 w-full text-base`}>
-                    {getWorkflowButtonText()}
-                  </button>
+                  <div className="flex items-center space-x-3">
+                    <button onClick={handleWorkflowToggle} disabled={isButtonDisabled} className={`${buttonStyle} ${getWorkflowButtonClass()} disabled:bg-gray-500 w-full text-base`}>
+                      {getWorkflowButtonText()}
+                    </button>
+                    <button onClick={handleWorkflowStop} className={`${buttonStyle} bg-red-600 hover:bg-red-700 w-full text-base`}>
+                        Stop Campaign
+                    </button>
+                  </div>
                   {workflowError && <p className="text-red-400 mt-2 text-sm">{workflowError}</p>}
                 </div>
 
@@ -319,11 +359,20 @@ function OutreachPage() {
                         ) : (
                           <div className="flex justify-between items-start">
                             <div className="grow mr-4">
+                               {/* MODIFIED: Added active/inactive status indicator */}
                                <div className="flex items-center space-x-3 mb-1">
                                  <h4 className="font-bold text-white">{c.name}</h4>
-                                 <span className="text-xs font-mono text-cyan-300 bg-gray-700 px-2 py-0.5 rounded-full">
-                                   ID: {c.id}
-                                 </span>
+                                 {activeCampaignId === c.id ? (
+                                    <span className="flex items-center text-xs font-medium text-green-400">
+                                      <span className="h-2 w-2 mr-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                                      Active
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center text-xs font-medium text-gray-400">
+                                      <span className="h-2 w-2 mr-1.5 bg-red-500 rounded-full"></span>
+                                      Inactive
+                                    </span>
+                                  )}
                                </div>
                                <p className="text-gray-400 text-sm mt-1 wrap-break-words">{c.message}</p>
                             </div>
